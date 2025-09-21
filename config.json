@@ -1,0 +1,12 @@
+{
+    "DB_HOST": "localhost",
+    "DB_NAME": "billing_software",
+    "DB_USER": "root",
+    "DB_PASSWORD": "admin",
+    "COMPANY_NAME": "PhoenixTechSolutions",
+    "ALLOW_NEGATIVE_STOCK": true,
+    "THERMAL_PRINTER_WIDTH": 80,
+    "COMPANY_ADDRESS": "no 420 bajanai kovil street abase nagar chennai 20",
+    "COMPANY_GST": "GST123555",
+    "COMPANY_PHONE": "9828167288"
+}
