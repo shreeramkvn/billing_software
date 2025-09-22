@@ -15,28 +15,414 @@ class MainUI:
         self.root = root
         self.db = db
         self.company_name = company_name
-        self.pdf_generator = PDFGenerator(company_name)
-        self.barcode_scanner = BarcodeScanner()
+        self.root.title(f"{self.company_name} - Billing Software")
+        self.root.geometry("1200x800")
+        self.root.state('zoomed')  # Start maximized
+
+        # Apply theme
+        self.set_theme()
         
-        # Set up the main notebook (tabbed interface)
-        self.notebook = ttk.Notebook(root)
-        self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
+        # Create menu bar
+        self.menu_bar = tk.Menu(self.root)
+        self.root.config(menu=self.menu_bar)
+        
+        # File menu
+        self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="File", menu=self.file_menu)
+        self.file_menu.add_command(label="New Bill", command=self.new_bill)
+        self.file_menu.add_command(label="Print Bill", command=self.print_bill)
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="Exit", command=self.root.quit)
+        
+        # View menu
+        self.view_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="View", menu=self.view_menu)
+        self.view_menu.add_command(label="Dashboard", command=self.show_dashboard)
+        self.view_menu.add_command(label="Billing", command=self.show_billing)
+        self.view_menu.add_command(label="Products", command=self.show_products)
+        self.view_menu.add_command(label="Reports", command=self.show_reports)
+        self.view_menu.add_command(label="Settings", command=self.show_settings)
+        
+        # Help menu
+        self.help_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Help", menu=self.help_menu)
+        self.help_menu.add_command(label="About", command=self.show_about)
+        
+        # Create notebook (tabs)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Create tabs
+        self.dashboard_tab = ttk.Frame(self.notebook)
+        self.billing_tab = ttk.Frame(self.notebook)
+        self.products_tab = ttk.Frame(self.notebook)
+        self.reports_tab = ttk.Frame(self.notebook)
+        self.settings_tab = ttk.Frame(self.notebook)
+        
+        # Add tabs to notebook
+        self.notebook.add(self.dashboard_tab, text="📊 Dashboard")
+        self.notebook.add(self.billing_tab, text="🧾 Billing")
+        self.notebook.add(self.products_tab, text="📦 Products")
+        self.notebook.add(self.reports_tab, text="📈 Reports")
+        self.notebook.add(self.settings_tab, text="⚙️ Settings")
+        
+        # Bind tab change event
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
+        
+        # Setup each tab (define these methods below)
         self.setup_dashboard_tab()
+        self.setup_billing_tab()  # You need to add this method
         self.setup_products_tab()
-        self.setup_clients_tab()
-        self.setup_sales_tab()
-        self.setup_purchase_tab()
         self.setup_reports_tab()
         self.setup_settings_tab()
+        self.bill_counter = 1001
+        self.load_bill_counter()
+        self.setup_ui()
         
-        # Load initial data
-        self.load_products()
-        self.load_clients()
-        self.load_recent_invoices()
+        # Status bar
+        self.status_bar = ttk.Label(self.root, text="Ready", relief=tk.SUNKEN, anchor=tk.W)
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Initialize variables
+        self.current_bill_items = []
+        self.bill_counter = self.get_last_bill_number() + 1
+        
+        # Set focus to first tab
+        self.notebook.select(0)
+        
+        # Update status
+        self.update_status("Application started successfully")
+
+    def setup_billing_tab(self):
+        """Setup the Billing tab"""
+        # Main frame
+        main_frame = ttk.Frame(self.billing_tab)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Left frame for product selection
+        left_frame = ttk.LabelFrame(main_frame, text="Product Selection", padding=10)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        
+        # Right frame for bill details
+        right_frame = ttk.LabelFrame(main_frame, text="Bill Details", padding=10, width=400)
+        right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
+        right_frame.pack_propagate(False)
+        
+        # Product search
+        ttk.Label(left_frame, text="Search Product:").pack(anchor=tk.W)
+        search_frame = ttk.Frame(left_frame)
+        search_frame.pack(fill=tk.X, pady=5)
+        
+        self.search_var = tk.StringVar()
+        search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
+        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        search_entry.bind('<KeyRelease>', self.search_products)
+        
+        ttk.Button(search_frame, text="Search", command=self.search_products).pack(side=tk.RIGHT)
+        
+        # Products treeview
+        product_columns = ("ID", "Name", "Price", "Stock")
+        self.products_tree = ttk.Treeview(left_frame, columns=product_columns, show='headings', height=15)
+        
+        for col in product_columns:
+            self.products_tree.heading(col, text=col)
+            self.products_tree.column(col, width=80)
+        
+        # Bind double click to add product to bill
+        self.products_tree.bind('<Double-1>', self.add_to_bill)
+        
+        # Scrollbar for products
+        product_scrollbar = ttk.Scrollbar(left_frame, orient=tk.VERTICAL, command=self.products_tree.yview)
+        self.products_tree.configure(yscrollcommand=product_scrollbar.set)
+        
+        self.products_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        product_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Bill details
+        # Bill number
+        bill_frame = ttk.Frame(right_frame)
+        bill_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(bill_frame, text="Bill #:").pack(side=tk.LEFT)
+        self.bill_number_var = tk.StringVar(value=str(self.bill_counter))
+        ttk.Label(bill_frame, textvariable=self.bill_number_var, font=('Arial', 12, 'bold')).pack(side=tk.LEFT)
+        
+        # Bill items treeview
+        bill_columns = ("Product", "Qty", "Price", "Total")
+        self.bill_tree = ttk.Treeview(right_frame, columns=bill_columns, show='headings', height=10)
+        
+        for col in bill_columns:
+            self.bill_tree.heading(col, text=col)
+            self.bill_tree.column(col, width=80)
+        
+        # Scrollbar for bill items
+        bill_scrollbar = ttk.Scrollbar(right_frame, orient=tk.VERTICAL, command=self.bill_tree.yview)
+        self.bill_tree.configure(yscrollcommand=bill_scrollbar.set)
+        
+        self.bill_tree.pack(fill=tk.BOTH, expand=True, pady=5)
+        bill_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Total amount
+        total_frame = ttk.Frame(right_frame)
+        total_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(total_frame, text="Total:", font=('Arial', 12, 'bold')).pack(side=tk.LEFT)
+        self.total_var = tk.StringVar(value="₹0.00")
+        ttk.Label(total_frame, textvariable=self.total_var, font=('Arial', 12, 'bold')).pack(side=tk.RIGHT)
+        
+        # Action buttons
+        button_frame = ttk.Frame(right_frame)
+        button_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Button(button_frame, text="New Bill", command=self.new_bill).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame, text="Print Bill", command=self.print_bill).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame, text="Save Bill", command=self.save_bill).pack(side=tk.LEFT, padx=2)
+        
+        # Load initial products
+        self.load_products_for_billing()
+
+    def load_products_for_billing(self):
+        """Load products for billing tab"""
+        try:
+            # Clear existing items
+            for item in self.products_tree.get_children():
+                self.products_tree.delete(item)
+            
+            # Get products from database
+            products = self.db.get_products()
+            
+            for product in products:
+                self.products_tree.insert("", tk.END, values=(
+                    product[0],  # ID
+                    product[1],  # Name
+                    f"₹{product[2]:.2f}",  # Price
+                    product[3]   # Stock
+                ))
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load products: {str(e)}")
+
+    def search_products(self, event=None):
+        """Search products based on input"""
+        search_term = self.search_var.get().lower()
+        
+        # Clear existing items
+        for item in self.products_tree.get_children():
+            self.products_tree.delete(item)
+        
+        try:
+            products = self.db.get_products()
+            
+            for product in products:
+                if search_term in product[1].lower() or search_term in str(product[0]).lower():
+                    self.products_tree.insert("", tk.END, values=(
+                        product[0],  # ID
+                        product[1],  # Name
+                        f"₹{product[2]:.2f}",  # Price
+                        product[3]   # Stock
+                    ))
+                    
+        except Exception as e:
+            messagebox.showerror("Error", f"Search failed: {str(e)}")
+
+    def add_to_bill(self, event):
+        """Add selected product to bill"""
+        selected_item = self.products_tree.selection()
+        if not selected_item:
+            return
+        
+        item = self.products_tree.item(selected_item[0])
+        product_id, product_name, price_str, stock = item['values']
+        
+        # Extract numeric price
+        price = float(price_str.replace('₹', ''))
+        
+        # Ask for quantity
+        quantity = simpledialog.askinteger("Quantity", f"Enter quantity for {product_name}:", 
+                                        minvalue=1, maxvalue=int(stock))
+        
+        if quantity:
+            total = price * quantity
+            self.bill_tree.insert("", tk.END, values=(
+                product_name, quantity, f"₹{price:.2f}", f"₹{total:.2f}"
+            ))
+            
+            # Add to current bill items
+            self.current_bill_items.append({
+                'product_id': product_id,
+                'name': product_name,
+                'quantity': quantity,
+                'price': price,
+                'total': total
+            })
+            
+            # Update total
+            self.update_bill_total()
+
+    def update_bill_total(self):
+        """Update the total amount of the bill"""
+        total = sum(item['total'] for item in self.current_bill_items)
+        self.total_var.set(f"₹{total:.2f}")
+
+    def save_bill(self):
+        """Save bill to database"""
+        if not self.current_bill_items:
+            messagebox.showwarning("Warning", "No items in the bill!")
+            return
+        
+        try:
+            total_amount = sum(item['total'] for item in self.current_bill_items)
+            
+            # Save bill header
+            bill_query = """
+            INSERT INTO bills (bill_number, total_amount, created_at)
+            VALUES (%s, %s, NOW())
+            """
+            self.db.cursor.execute(bill_query, (self.bill_counter, total_amount))
+            
+            # Get the bill ID
+            bill_id = self.db.cursor.lastrowid
+            
+            # Save bill items
+            for item in self.current_bill_items:
+                item_query = """
+                INSERT INTO bill_items (bill_id, product_id, quantity, price, total)
+                VALUES (%s, %s, %s, %s, %s)
+                """
+                self.db.cursor.execute(item_query, (
+                    bill_id, item['product_id'], item['quantity'], 
+                    item['price'], item['total']
+                ))
+                
+                # Update product stock
+                update_stock_query = """
+                UPDATE products SET stock_quantity = stock_quantity - %s 
+                WHERE product_id = %s
+                """
+                self.db.cursor.execute(update_stock_query, (item['quantity'], item['product_id']))
+            
+            self.db.conn.commit()
+            messagebox.showinfo("Success", f"Bill #{self.bill_counter} saved successfully!")
+            self.new_bill()
+            
+        except Exception as e:
+            self.db.conn.rollback()
+            messagebox.showerror("Error", f"Failed to save bill: {str(e)}")
+
+    def set_theme(self):
+        """Set the application theme"""
+        try:
+            # Try to use a modern theme if available
+            self.root.tk.call("source", "azure.tcl")
+            self.root.tk.call("set_theme", "light")
+        except:
+            # Fallback to default theme
+            style = ttk.Style()
+            style.theme_use('clam')
+
+    def new_bill(self):
+        """Create a new bill"""
+        self.current_bill_items = []
+        self.bill_counter += 1
+        self.update_status("New bill created")
+
+    def print_bill(self):
+        """Print current bill"""
+        messagebox.showinfo("Print", "Print functionality will be implemented")
+
+    def show_dashboard(self):
+        """Show dashboard tab"""
+        self.notebook.select(0)
+
+    def show_billing(self):
+        """Show billing tab"""
+        self.notebook.select(1)
+
+    def show_products(self):
+        """Show products tab"""
+        self.notebook.select(2)
+
+    def show_reports(self):
+        """Show reports tab"""
+        self.notebook.select(3)
+
+    def show_settings(self):
+        """Show settings tab"""
+        self.notebook.select(4)
+
+    def show_about(self):
+        """Show about dialog"""
+        messagebox.showinfo("About", f"{self.company_name} Billing Software\nVersion 1.0")
+
+    def on_tab_changed(self, event):
+        """Handle tab change events"""
+        tab_index = self.notebook.index(self.notebook.select())
+        tab_names = ["Dashboard", "Billing", "Products", "Reports", "Settings"]
+        self.update_status(f"Viewing {tab_names[tab_index]} tab")
+
+    def get_last_bill_number(self):
+        """Get the last bill number from database"""
+        try:
+            self.db.cursor.execute("SELECT MAX(bill_number) FROM bills")
+            result = self.db.cursor.fetchone()
+            return result[0] if result[0] is not None else 0
+        except:
+            return 0
+
+    def update_status(self, message):
+        """Update status bar message"""
+        self.status_bar.config(text=message)
+        self.root.update_idletasks()
+
+    def get_products(self):
+        """Get all products from database"""
+        query = "SELECT product_id, name, price, stock_quantity, category FROM products ORDER BY name"
+        self.cursor.execute(query)
+        return self.cursor.fetchall()
         
     def setup_dashboard_tab(self):
+        try:
+            # Check if dashboard widgets exist before using them
+            if not hasattr(self, 'dashboard_items_label'):
+                print("Dashboard widgets not initialized yet")
+                return
+                
+            total_items = self.db.get_total_items()
+            total_clients = self.db.get_total_clients()
+            total_sales = self.db.get_total_sales()
+            
+            # Add error handling for these method calls
+            try:
+                low_stock = self.count_low_stock_items()
+            except Exception as e:
+                print(f"Error counting low stock items: {e}")
+                low_stock = 0
+                
+            try:
+                today_sales = self.get_today_sales()
+            except Exception as e:
+                print(f"Error getting today's sales: {e}")
+                today_sales = 0
+            
+            # Update dashboard labels with the values
+            self.dashboard_items_label.setText(f"Total Items: {total_items}")
+            self.dashboard_clients_label.setText(f"Total Clients: {total_clients}")
+            self.dashboard_sales_label.setText(f"Total Sales: ₹{total_sales:,.2f}")
+            self.dashboard_low_stock_label.setText(f"Low Stock Items: {low_stock}")
+            self.dashboard_today_sales_label.setText(f"Today's Sales: ₹{today_sales:,.2f}")
+            
+        except Exception as e:
+            print(f"Error setting up dashboard: {e}")
+            # Only set text if the labels exist
+            if hasattr(self, 'dashboard_items_label'):
+                self.dashboard_items_label.setText("Total Items: Error")
+            if hasattr(self, 'dashboard_clients_label'):
+                self.dashboard_clients_label.setText("Total Clients: Error")
+            if hasattr(self, 'dashboard_sales_label'):
+                self.dashboard_sales_label.setText("Total Sales: Error")
+            if hasattr(self, 'dashboard_low_stock_label'):
+                self.dashboard_low_stock_label.setText("Low Stock Items: Error")
+            if hasattr(self, 'dashboard_today_sales_label'):
+                self.dashboard_today_sales_label.setText("Today's Sales: Error")
+            
         """Create the dashboard tab"""
         self.dashboard_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.dashboard_tab, text='Dashboard')
@@ -112,11 +498,20 @@ class MainUI:
             command=self.view_selected_invoice
         )
         view_btn.pack(pady=10)
-    
-    def setup_products_tab(self):
-        """Create the products management tab"""
-        self.products_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.products_tab, text='Products')
+
+    def setup_barcode_scanner(self):
+        """Setup barcode scanner with fallback"""
+        try:
+            from pyzbar.pyzbar import decode
+            self.has_barcode_scanner = True
+            print("Barcode scanner initialized successfully")
+        except ImportError as e:
+            print(f"Barcode scanner not available: {e}")
+            self.has_barcode_scanner = False
+        def setup_products_tab(self):
+            """Create the products management tab"""
+            self.products_tab = ttk.Frame(self.notebook)
+            self.notebook.add(self.products_tab, text='Products')
         
         # Top frame for form
         form_frame = ttk.LabelFrame(self.products_tab, text="Add/Edit Product")
@@ -200,6 +595,44 @@ class MainUI:
         
         ttk.Button(action_frame, text="Delete Selected", command=self.delete_product).pack(side=tk.LEFT, padx=5)
         ttk.Button(action_frame, text="Refresh List", command=self.load_products).pack(side=tk.LEFT, padx=5)
+
+    def verify_database_schema(self):
+        """Verify that required database tables and columns exist"""
+        required_tables = ['items', 'clients', 'invoices', 'invoice_items']
+        required_columns = {
+            'clients': ['id', 'name', 'phone', 'gst_number'],
+            'items': ['id', 'name', 'quantity', 'min_stock', 'price'],
+            'invoices': ['id', 'client_id', 'date', 'total_amount', 'type']
+        }
+        
+        cursor = self.db.conn.cursor()
+        
+        for table in required_tables:
+            cursor.execute(f"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)", (table,))
+            if not cursor.fetchone()[0]:
+                print(f"Warning: Table '{table}' does not exist in database")
+        
+        for table, columns in required_columns.items():
+            for column in columns:
+                cursor.execute(f"SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_name = %s AND column_name = %s)", 
+                            (table, column))
+                if not cursor.fetchone()[0]:
+                    print(f"Warning: Column '{column}' does not exist in table '{table}'")
+        
+        cursor.close()
+
+    def get_today_sales(self):
+        """Get today's sales total"""
+        try:
+            today = datetime.now().strftime('%Y-%m-%d')
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT COALESCE(SUM(total_amount), 0) FROM invoices WHERE date = %s AND type = 'SALE'", (today,))
+            result = cursor.fetchone()
+            cursor.close()
+            return result[0] if result else 0
+        except Exception as e:
+            print(f"Error getting today's sales: {e}")
+            return 0
     
     def setup_clients_tab(self):
         """Create the clients management tab"""
@@ -387,15 +820,165 @@ class MainUI:
         self.invoice_items = []
     
     def setup_purchase_tab(self):
-        """Create the purchase (stock in) tab"""
-        self.purchase_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.purchase_tab, text='Purchase')
+        """Create the purchases (stock in) tab"""
+        self.purchases_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.purchases_tab, text='purchases')
         
-        # This tab would be similar to sales tab but for purchases
-        # Implementation would follow similar pattern as sales tab
+        # Top frame for client selection
+        client_frame = ttk.LabelFrame(self.purchases_tab, text="Client Selection")
+        client_frame.pack(fill='x', padx=20, pady=10)
         
-        placeholder = ttk.Label(self.purchase_tab, text="Purchase Management - Similar to Sales Tab", font=("Arial", 12))
-        placeholder.pack(pady=50)
+        ttk.Label(client_frame, text="Select Client:").grid(row=0, column=0, padx=5, pady=5, sticky='e')
+        self.sale_client = tk.StringVar()
+        clients = [c['name'] for c in self.get_clients_safe()]
+        self.client_combo = ttk.Combobox(client_frame, textvariable=self.sale_client, values=clients, state="readonly")
+        self.client_combo.grid(row=0, column=1, padx=5, pady=5, sticky='w')
+        
+        ttk.Button(client_frame, text="New Client", command=self.add_client_from_purchases).grid(row=0, column=2, padx=5, pady=5)
+        
+        # Product selection frame
+        product_frame = ttk.LabelFrame(self.purchases_tab, text="Add Product to Invoice")
+        product_frame.pack(fill='x', padx=20, pady=10)
+        
+        ttk.Label(product_frame, text="Product:").grid(row=0, column=0, padx=5, pady=5, sticky='e')
+        self.sale_product = tk.StringVar()
+        products = [p['name'] for p in self.get_products_safe()]
+        self.product_combo = ttk.Combobox(product_frame, textvariable=self.sale_product, values=products, state="readonly")
+        self.product_combo.grid(row=0, column=1, padx=5, pady=5, sticky='w')
+        self.product_combo.bind('<<ComboboxSelected>>', self.on_product_selected)
+        
+        ttk.Label(product_frame, text="Quantity:").grid(row=0, column=2, padx=5, pady=5, sticky='e')
+        self.sale_quantity = ttk.Entry(product_frame, width=10)
+        self.sale_quantity.grid(row=0, column=3, padx=5, pady=5, sticky='w')
+        
+        ttk.Label(product_frame, text="Rate:").grid(row=0, column=4, padx=5, pady=5, sticky='e')
+        self.sale_rate = ttk.Entry(product_frame, width=10, state='readonly')
+        self.sale_rate.grid(row=0, column=5, padx=5, pady=5, sticky='w')
+        
+        ttk.Button(product_frame, text="Scan Barcode", command=self.scan_barcode_for_sale).grid(row=0, column=6, padx=5, pady=5)
+        ttk.Button(product_frame, text="Add to Invoice", command=self.add_to_invoice).grid(row=0, column=7, padx=5, pady=5)
+        
+        # Invoice items frame
+        items_frame = ttk.LabelFrame(self.purchases_tab, text="Invoice Items")
+        items_frame.pack(fill='both', expand=True, padx=20, pady=10)
+        
+        # Create treeview for invoice items
+        columns = ('sno', 'description', 'hsn', 'qty', 'rate', 'amount')
+        self.invoice_items_tree = ttk.Treeview(items_frame, columns=columns, show='headings')
+        
+        # Define headings
+        self.invoice_items_tree.heading('sno', text='SNo')
+        self.invoice_items_tree.heading('description', text='Description')
+        self.invoice_items_tree.heading('hsn', text='HSN Code')
+        self.invoice_items_tree.heading('qty', text='Quantity')
+        self.invoice_items_tree.heading('rate', text='Rate')
+        self.invoice_items_tree.heading('amount', text='Amount')
+        
+        # Define columns
+        self.invoice_items_tree.column('sno', width=50)
+        self.invoice_items_tree.column('description', width=250)
+        self.invoice_items_tree.column('hsn', width=80)
+        self.invoice_items_tree.column('qty', width=80)
+        self.invoice_items_tree.column('rate', width=80)
+        self.invoice_items_tree.column('amount', width=100)
+        
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(items_frame, orient=tk.VERTICAL, command=self.invoice_items_tree.yview)
+        self.invoice_items_tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack tree and scrollbar
+        self.invoice_items_tree.pack(side=tk.LEFT, fill='both', expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Total amount frame
+        total_frame = ttk.Frame(self.purchases_tab)
+        total_frame.pack(fill='x', padx=20, pady=5)
+        
+        ttk.Label(total_frame, text="Total Amount:", font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=5)
+        self.total_amount = ttk.Label(total_frame, text="0.00", font=("Arial", 10, "bold"))
+        self.total_amount.pack(side=tk.LEFT, padx=5)
+        
+        # Action buttons
+        action_frame = ttk.Frame(self.purchases_tab)
+        action_frame.pack(pady=10)
+        
+        ttk.Button(action_frame, text="Remove Selected", command=self.remove_invoice_item).pack(side=tk.LEFT, padx=5)
+        ttk.Button(action_frame, text="Clear Invoice", command=self.clear_invoice).pack(side=tk.LEFT, padx=5)
+        ttk.Button(action_frame, text="Generate Invoice", command=self.generate_sale_invoice).pack(side=tk.LEFT, padx=5)
+        ttk.Button(action_frame, text="Print Receipt", command=self.print_receipt).pack(side=tk.LEFT, padx=5)
+        
+        # Initialize invoice items list
+        self.invoice_items = []
+
+    def load_products_data(self):
+        """Load products data into the treeview"""
+        # Clear existing data
+        for item in self.products_tree.get_children():
+            self.products_tree.delete(item)
+        
+        try:
+            # Fetch products from database
+            products = self.db.get_products()
+            
+            # Insert products into treeview
+            for product in products:
+                self.products_tree.insert("", tk.END, values=product)
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load products: {str(e)}")
+
+    def add_product(self):
+        """Placeholder for add product functionality"""
+        messagebox.showinfo("Info", "Add product functionality will be implemented here")
+
+    def edit_product(self):
+        """Placeholder for edit product functionality"""
+        messagebox.showinfo("Info", "Edit product functionality will be implemented here")
+
+    def delete_product(self):
+        """Placeholder for delete product functionality"""
+        messagebox.showinfo("Info", "Delete product functionality will be implemented here")
+
+    def setup_products_tab(self):
+        """Setup the Products/Inventory tab"""
+        # Main frame
+        main_frame = ttk.Frame(self.products_tab)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Left frame for treeview
+        left_frame = ttk.Frame(main_frame)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        
+        # Right frame for controls
+        right_frame = ttk.Frame(main_frame, width=200)
+        right_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
+        right_frame.pack_propagate(False)
+        
+        # Create treeview
+        columns = ("ID", "Name", "Price", "Stock", "Category")
+        self.products_tree = ttk.Treeview(left_frame, columns=columns, show='headings', height=20)
+        
+        # Set column headings
+        for col in columns:
+            self.products_tree.heading(col, text=col)
+            self.products_tree.column(col, width=100)
+        
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(left_frame, orient=tk.VERTICAL, command=self.products_tree.yview)
+        self.products_tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack treeview and scrollbar
+        self.products_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Add control buttons
+        ttk.Button(right_frame, text="Add Product", command=self.add_product).pack(pady=5, fill=tk.X)
+        ttk.Button(right_frame, text="Edit Product", command=self.edit_product).pack(pady=5, fill=tk.X)
+        ttk.Button(right_frame, text="Delete Product", command=self.delete_product).pack(pady=5, fill=tk.X)
+        ttk.Button(right_frame, text="Refresh", command=self.load_products_data).pack(pady=5, fill=tk.X)
+        
+        # Load initial data
+        self.load_products_data()
     
     def setup_reports_tab(self):
         """Create the reports tab"""
@@ -530,34 +1113,30 @@ class MainUI:
             ))
     
     def load_clients(self):
-        """Load clients into the clients treeview"""
-        for item in self.client_tree.get_children():
-            self.client_tree.delete(item)
-        
-        client_type = self.client_filter.get()
         try:
-            if hasattr(self.db, 'get_clients'):
-                clients = self.db.get_clients(client_type if client_type != "ALL" else None)
-            else:
-                # Fallback to direct database query
-                if client_type != "ALL":
-                    clients = self.db.fetch_all("SELECT * FROM clients WHERE client_type = %s", (client_type,))
-                else:
-                    clients = self.db.fetch_all("SELECT * FROM clients")
+            cursor = self.db.conn.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM clients")
+            clients = cursor.fetchall()
+            cursor.close()
+            
+            # Clear existing items in the treeview
+            for item in self.clients_tree.get_children():
+                self.clients_tree.delete(item)
+            
+            # Insert clients into treeview with safe field access
+            for client in clients:
+                self.clients_tree.insert("", "end", values=(
+                    client['id'],
+                    client.get('name', ''),
+                    client.get('phone', ''),
+                    client.get('email', ''),
+                    client.get('gst_number', '') or '',
+                    client.get('address', '')
+                ))
+                
         except Exception as e:
             print(f"Error loading clients: {e}")
-            clients = []
-        
-        for client in clients:
-            self.client_tree.insert('', 'end', values=(
-                client['id'],
-                client['name'],
-                client['address'],
-                client['phone'],
-                client['gst_number'] or '',
-                client['client_type'],
-                client['last_bill_date'] or 'Never'
-            ))
+            # Show error message to user if needed
     
     def load_recent_invoices(self):
         """Load recent invoices into the dashboard treeview"""
@@ -1052,6 +1631,14 @@ class MainUI:
     def add_client_from_sales(self):
         """Open client form from sales tab"""
         self.notebook.select(self.clients_tab)
+
+    def add_client_from_purchases(self):
+        """Open client form from purchases tab"""
+        self.notebook.select(self.clients_tab)
+
+    def count_low_stock_items(self):
+        """Placeholder method if you don't have stock management"""
+        return 0  # Return 0 since you're not tracking stock
     
     def view_selected_invoice(self):
         """View selected invoice details"""
@@ -1266,12 +1853,124 @@ class MainUI:
             messagebox.showerror("Error", f"Failed to optimize database: {str(e)}")
     
     def count_low_stock_items(self):
-        """Count low stock items"""
+        """Count items with low stock (assuming you have a stock_quantity column)"""
         try:
-            products = self.get_products_safe()
-            return sum(1 for p in products if p['current_stock'] < 10)
-        except:
+            cursor = self.db.conn.cursor()
+            # Make sure your database has the correct column names
+            cursor.execute("SELECT COUNT(*) FROM items WHERE quantity <= min_stock AND quantity > 0")
+            result = cursor.fetchone()
+            cursor.close()
+            return result[0] if result else 0
+        except Exception as e:
+            print(f"Error counting low stock items: {e}")
             return 0
+        
+    def count_clients(self):
+        """Count total clients"""
+        try:
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM clients")
+            count = cursor.fetchone()[0]
+            cursor.close()
+            return count
+        except Exception as e:
+            print(f"Error counting clients: {e}")
+            return 0
+        
+    def create_dashboard_widgets(self):
+        """Create dashboard widgets"""
+        # Make sure dashboard_frame exists
+        if not hasattr(self, 'dashboard_frame'):
+            print("Creating dashboard frame...")
+            self.dashboard_frame = ttk.Frame(self.dashboard_tab)
+            self.dashboard_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Dashboard labels
+        self.dashboard_items_label = ttk.Label(self.dashboard_frame, text="Total Items: Loading...", font=('Arial', 12))
+        self.dashboard_items_label.pack(pady=10, anchor='w')
+        
+        self.dashboard_clients_label = ttk.Label(self.dashboard_frame, text="Total Clients: Loading...", font=('Arial', 12))
+        self.dashboard_clients_label.pack(pady=10, anchor='w')
+        
+        self.dashboard_sales_label = ttk.Label(self.dashboard_frame, text="Total Sales: Loading...", font=('Arial', 12))
+        self.dashboard_sales_label.pack(pady=10, anchor='w')
+        
+        self.dashboard_low_stock_label = ttk.Label(self.dashboard_frame, text="Low Stock Items: Loading...", font=('Arial', 12))
+        self.dashboard_low_stock_label.pack(pady=10, anchor='w')
+        
+        self.dashboard_today_sales_label = ttk.Label(self.dashboard_frame, text="Today's Sales: Loading...", font=('Arial', 12))
+        self.dashboard_today_sales_label.pack(pady=10, anchor='w')
+        
+        print("Dashboard widgets created successfully")
+
+    def count_invoices(self):
+        """Count total invoices"""
+        try:
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM invoices")
+            count = cursor.fetchone()[0]
+            cursor.close()
+            return count
+        except Exception as e:
+            print(f"Error counting invoices: {e}")
+            return 0
+        
+    def setup_items_tab(self):
+        """Setup items/products tab"""
+        print("Setting up items tab...")
+        
+        # Items frame
+        self.items_frame = ttk.Frame(self.items_tab)
+        self.items_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Search frame
+        search_frame = ttk.Frame(self.items_frame)
+        search_frame.pack(fill='x', pady=5)
+        
+        ttk.Label(search_frame, text="Search:").pack(side='left', padx=5)
+        self.item_search_var = tk.StringVar()
+        self.item_search_entry = ttk.Entry(search_frame, textvariable=self.item_search_var, width=30)
+        self.item_search_entry.pack(side='left', padx=5)
+        self.item_search_entry.bind('<KeyRelease>', self.search_items)
+        
+        # Items treeview
+        columns = ('id', 'name', 'quantity', 'min_stock', 'price', 'category')
+        self.items_tree = ttk.Treeview(self.items_frame, columns=columns, show='headings', height=15)
+        
+        # Define headings
+        self.items_tree.heading('id', text='ID')
+        self.items_tree.heading('name', text='Name')
+        self.items_tree.heading('quantity', text='Quantity')
+        self.items_tree.heading('min_stock', text='Min Stock')
+        self.items_tree.heading('price', text='Price')
+        self.items_tree.heading('category', text='Category')
+        
+        # Define columns
+        self.items_tree.column('id', width=50, anchor='center')
+        self.items_tree.column('name', width=200, anchor='w')
+        self.items_tree.column('quantity', width=80, anchor='center')
+        self.items_tree.column('min_stock', width=80, anchor='center')
+        self.items_tree.column('price', width=80, anchor='e')
+        self.items_tree.column('category', width=100, anchor='w')
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(self.items_frame, orient='vertical', command=self.items_tree.yview)
+        self.items_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.items_tree.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+        
+        # Buttons frame
+        button_frame = ttk.Frame(self.items_frame)
+        button_frame.pack(fill='x', pady=10)
+        
+        ttk.Button(button_frame, text="Add Item", command=self.add_item).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Edit Item", command=self.edit_item).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Delete Item", command=self.delete_item).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Refresh", command=self.load_items).pack(side='left', padx=5)
+        
+        # Load items
+        self.load_items()
     
     def get_today_sales(self):
         """Get today's sales total"""
@@ -1287,6 +1986,71 @@ class MainUI:
                 return result[0] if result else 0
         except:
             return 0
+        
+    def setup_ui(self):
+        """Setup main UI components"""
+        self.root.title(f"{self.company_name} - Billing Software")
+        self.root.geometry("1200x800")
+        
+        # Create notebook (tab control)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Create tabs
+        self.dashboard_tab = ttk.Frame(self.notebook)
+        self.items_tab = ttk.Frame(self.notebook)
+        self.clients_tab = ttk.Frame(self.notebook)
+        self.invoices_tab = ttk.Frame(self.notebook)
+        self.reports_tab = ttk.Frame(self.notebook)
+        
+        # Add tabs to notebook
+        self.notebook.add(self.dashboard_tab, text='Dashboard')
+        self.notebook.add(self.items_tab, text='Items')
+        self.notebook.add(self.clients_tab, text='Clients')
+        self.notebook.add(self.invoices_tab, text='Invoices')
+        self.notebook.add(self.reports_tab, text='Reports')
+        
+        print("UI setup completed")
+
+    def load_bill_counter(self):
+        # Example code to load the last bill number from database
+        try:
+            cursor = self.db.get_cursor()
+            cursor.execute("SELECT MAX(bill_number) FROM bills")
+            result = cursor.fetchone()
+            self.bill_counter = result[0] + 1 if result[0] else 1001
+        except:
+            # Fallback if there's any error
+            self.bill_counter = 1001
+
+    def search_items(self, event=None):
+        """Search items based on query"""
+        query = self.item_search_var.get().lower()
+        if not query:
+            self.load_items()
+            return
+        
+        try:
+            cursor = self.db.conn.cursor()
+            cursor.execute("""
+                SELECT id, name, quantity, min_stock, price, category 
+                FROM items 
+                WHERE LOWER(name) LIKE %s OR LOWER(category) LIKE %s
+            """, (f'%{query}%', f'%{query}%'))
+            
+            items = cursor.fetchall()
+            cursor.close()
+            
+            # Clear treeview
+            for item in self.items_tree.get_children():
+                self.items_tree.delete(item)
+            
+            # Add filtered items
+            for item in items:
+                self.items_tree.insert('', 'end', values=item)
+                
+        except Exception as e:
+            print(f"Error searching items: {e}")
 
 # Configure text tags for reports
 def configure_text_tags(report_text):

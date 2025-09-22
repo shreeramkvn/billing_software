@@ -27,4 +27,12 @@ A comprehensive billing software with inventory management, built with Python an
 To build a standalone executable:
 
 ```bash
-python build.py
+python build.py 
+(or)
+'''you can define how to run the project
+'''bash
+pyinstaller --onefile --windowed --add-data "license.key;." --add-data "libzbar-64.dll;." --add-data "libzbar.dll;." --add-data "libiconv.dll;." --name BillingSoftware main.py
+(or)
+'''use this to run the application with app icon
+'''bash
+pyinstaller main.py --name=BillingSoftware --onefile --windowed --icon=app_icon.ico
